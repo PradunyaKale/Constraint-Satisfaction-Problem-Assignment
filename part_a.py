@@ -8,17 +8,17 @@ def parse_input(input_csv):
         row = next(reader)
         print(row)
     
-        N = int(row['N'])
-        D = int(row['D'])
-        N_s = int(row['N_s'])
-        N_g = int(row['N_g'])
-        m = int(row['m'])
-        a = int(row['a'])
-        e = int(row['e'])
-        T = float(row['T'])
-        days = row['days']
-        max_shifts = int(row['K'])
-        leaves = row['leaves']
+        N = int(row['N'])               #Number of nurses
+        D = int(row['D'])               #Number of days
+        N_s = int(row['N_s'])           #Number of surgical nurses
+        N_g = int(row['N_g'])           #Number of general nurses
+        m = int(row['m'])               #Exact number of nursese required on Morning
+        a = int(row['a'])               #Exact number of nursese required on Afternoon
+        e = int(row['e'])               #Exact number of nursese required on Evening
+        T = float(row['T'])             #The time budget for providing a solution to a test problem (in seconds)
+        days = row['days']              # A string of length D indicating which days are general and which days are surgical
+        max_shifts = int(row['K'])      #The maximum shifts allowed for any nurse overall
+        leaves = row['leaves']          #Example: WWWWWLWWWWWW 
     return N, D, N_s, N_g, m, a, e, T, days, max_shifts, leaves
 if __name__ == '__main__': 
 
