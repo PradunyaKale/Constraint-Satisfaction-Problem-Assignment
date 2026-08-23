@@ -53,3 +53,59 @@ class NurseRoster:
         self.day_counts = [{'M': 0, 'A': 0, 'E': 0, 'B': 0} for _ in range(D)]
 
         self.start_time = None
+        
+        def candidate_shifts(self, i, d):
+            if d in self.leave_days[i]:
+                return ['R']
+        
+            options = list(BASE_DOMAIN)
+            if self.nurse_type[i] == 'S' and self.days[d] == 'S':
+                options.append(SURGERY_SHIFT)
+        
+            prev = self.roster[i][d - 1] if d > 0 else None
+            legal = []
+            for shift in options:
+                if shift == 'R':
+                    legal.append(shift)
+                    continue
+        
+                # H5: 5 consecutive working days already used up -> must rest
+                if self.consecutive_work_before(i, d) >= 5:
+                    continue
+        
+                # H2: no two consecutive morning shifts (B counts as a morning)
+                if shift in ('M', 'B') and prev in ('M', 'B'):
+                    continue
+        
+                # H3: no morning immediately after evening
+                if shift in ('M', 'B') and prev == 'E':
+                    continue
+        
+                # H6: after a B, cannot do M or A the next day
+                if prev == 'B' and shift in ('M', 'A'):
+                    continue
+        
+                # H8: total shift-unit budget K
+                units = 2 if shift == 'B' else 1
+                if self.shift_units[i] + units > self.K:
+                    continue
+        
+                legal.append(shift)
+            return legal
+        
+        
+        def apply(self, i, d, shift):
+            self.roster[i][d] = shift
+            counts = self.day_counts[d]
+            if shift in ('M', 'A', 'E', 'B'):
+                counts[shift] += 1
+                self.shift_units[i] += 2 if shift == 'B' else 1
+    
+        def undo(self, i, d, shift):
+            self.roster[i][d] = None
+            counts = self.day_counts[d]
+            if shift in ('M', 'A', 'E', 'B'):
+                counts[shift] -= 1
+                self.shift_units[i] -= 2 if shift == 'B' else 1
+                
+        
