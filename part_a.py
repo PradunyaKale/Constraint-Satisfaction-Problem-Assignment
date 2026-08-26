@@ -96,6 +96,29 @@ class NurseRoster:
 
             legal.append(shift)
         return legal
+    
+    def forward_check(self, i, d):
+        """
+        Classic forward checking: after assigning nurse i on day d,
+        verify the adjacent variable (i, d+1) still has >= 1 legal
+        value left (H2/H3/H6 are exactly the binary constraint on this
+        arc).
+
+        NOTE: for this specific CSP this check is PROVABLY always
+        True. 'R' (rest) is never forbidden by any hard constraint --
+        H2/H3/H5/H6/H8 only ever restrict *working* shifts -- so no
+        assignment can ever drive a nurse's future domain to empty.
+        The only way this problem becomes infeasible is through the
+        shared per-day M/A/E/B quota across ALL nurses (H4/H7), which
+        is an N-ary constraint, not a pairwise one, so it can't be
+        expressed as a simple arc here. That's what quota_feasible /
+        next_day_quota_plausible check instead. This method is kept
+        so that fact is enforced and testable rather than just
+        asserted in a comment.
+        """
+        if d + 1 >= self.D:
+            return True
+        return len(self.candidate_shifts(i, d + 1)) > 0
 
 
     def apply(self, i, d, shift):
@@ -130,16 +153,30 @@ class NurseRoster:
             return False
         return True
 
-    def search(self, day=0, nurse=0):
+    def search(self, day=0, unassigned=None):
         if day == self.D:
             return True
+    
+        if unassigned is None:
+            unassigned = list(range(self.N))
 
-        if nurse == self.N:
-            return self.day_complete_and_valid(day) and self.search(day + 1, 0)
+        if not unassigned:
+            return self.day_complete_and_valid(day) and self.search(day + 1, None)
 
-        for shift in self.candidate_shifts(nurse, day):
+        domains = {i: self.candidate_shifts(i, day) for i in unassigned}
+
+        if any(len(v) == 0 for v in domains.values()):
+            return False
+
+        # MRV: branch on the most-constrained nurse first.
+        nurse = min(unassigned, key=lambda i: len(domains[i]))
+        remaining = [i for i in unassigned if i != nurse]
+
+        for shift in domains[nurse]:
             self.apply(nurse, day, shift)
-            if self.within_budget(day) and self.search(day, nurse + 1):
+            if (self.within_budget(day)
+                    and self.forward_check(nurse, day)
+                    and self.search(day, remaining)):
                 return True
             self.undo(nurse, day, shift)
 
