@@ -97,25 +97,15 @@ class NurseRoster:
             legal.append(shift)
         return legal
     
-    def forward_check(self, i, d):
-        """
-        Classic forward checking: after assigning nurse i on day d,
-        verify the adjacent variable (i, d+1) still has >= 1 legal
-        value left (H2/H3/H6 are exactly the binary constraint on this
-        arc).
+    def unrestricted_domain(self, i, d):
+        if d in self.leave_days[i]:
+            return ['R']
+        options = list(BASE_DOMAIN)
+        if self.nurse_type[i] == 'S' and self.days[d] == 'S':
+            options.append(SURGERY_SHIFT)
+        return options
 
-        NOTE: for this specific CSP this check is PROVABLY always
-        True. 'R' (rest) is never forbidden by any hard constraint --
-        H2/H3/H5/H6/H8 only ever restrict *working* shifts -- so no
-        assignment can ever drive a nurse's future domain to empty.
-        The only way this problem becomes infeasible is through the
-        shared per-day M/A/E/B quota across ALL nurses (H4/H7), which
-        is an N-ary constraint, not a pairwise one, so it can't be
-        expressed as a simple arc here. That's what quota_feasible /
-        next_day_quota_plausible check instead. This method is kept
-        so that fact is enforced and testable rather than just
-        asserted in a comment.
-        """
+    def forward_check(self, i, d):
         if d + 1 >= self.D:
             return True
         return len(self.candidate_shifts(i, d + 1)) > 0
@@ -153,6 +143,48 @@ class NurseRoster:
             return False
         return True
 
+    def quota_feasible(self, day, domains, b_already_assigned):
+        mm, aa, ee = self.day_bucket_totals(day)
+        need_m, need_a, need_e = self.m - mm, self.a - aa, self.e - ee
+
+        if need_m < 0 or need_a < 0 or need_e < 0:
+            return False
+
+        supply_m = sum(1 for v in domains.values() if 'M' in v or 'B' in v)
+        supply_a = sum(1 for v in domains.values() if 'A' in v or 'B' in v)
+        supply_e = sum(1 for v in domains.values() if 'E' in v)
+
+        if supply_m < need_m or supply_a < need_a or supply_e < need_e:
+            return False
+
+        if self.days[day] == 'S' and not b_already_assigned:
+            if not any('B' in v for v in domains.values()):
+                return False
+
+        return True
+
+    def next_day_quota_plausible(self, day):
+        nd = day + 1
+        if nd >= self.D:
+            return True
+
+        domains = {}
+        for i in range(self.N):
+            if self.roster[i][day] is not None:
+                domains[i] = self.candidate_shifts(i, nd)
+            else:
+                domains[i] = self.unrestricted_domain(i, nd)
+
+        supply_m = sum(1 for v in domains.values() if 'M' in v or 'B' in v)
+        supply_a = sum(1 for v in domains.values() if 'A' in v or 'B' in v)
+        supply_e = sum(1 for v in domains.values() if 'E' in v)
+
+        if supply_m < self.m or supply_a < self.a or supply_e < self.e:
+            return False
+        if self.days[nd] == 'S' and not any('B' in v for v in domains.values()):
+            return False
+        return True
+
     def search(self, day=0, unassigned=None):
         if day == self.D:
             return True
@@ -166,6 +198,12 @@ class NurseRoster:
         domains = {i: self.candidate_shifts(i, day) for i in unassigned}
 
         if any(len(v) == 0 for v in domains.values()):
+            return False
+        
+        b_assigned = self.day_counts[day]['B'] > 0
+        if not self.quota_feasible(day, domains, b_assigned):
+            return False
+        if not self.next_day_quota_plausible(day):
             return False
 
         # MRV: branch on the most-constrained nurse first.
