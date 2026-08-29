@@ -10,7 +10,6 @@ def parse_input(input_csv):
     with open(input_csv, 'r') as f:
         reader = csv.DictReader(f)
         row = next(reader)
-        print(row)
     
         N = int(row['N'])               #Number of nurses
         D = int(row['D'])               #Number of days
