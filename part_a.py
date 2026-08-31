@@ -28,6 +28,7 @@ def parse_input(input_csv):
 class NurseRoster:
 
     def __init__(self, N, D, Ns, Ng, m, a, e, T, days, K, leaves):
+        """Initializes the nurse roster problem state."""
         self.N, self.D = N, D
         self.Ns, self.Ng = Ns, Ng
         self.m, self.a, self.e = m, a, e
@@ -51,6 +52,7 @@ class NurseRoster:
         self.start_time = None
         
     def consecutive_work_before(self, i, d):
+        """Counts the number of consecutive working days for a nurse immediately before day d."""
         streak = 0
         dd = d - 1
         while dd >= 0 and streak < 5 and self.roster[i][dd] != 'R':
@@ -59,6 +61,7 @@ class NurseRoster:
         return streak
         
     def candidate_shifts(self, i, d):
+        """Computes the legal shift assignments for a nurse on a given day, based on constraints already fixed by prior days."""
         if d in self.leave_days[i]:
             return ['R']
 
@@ -98,6 +101,7 @@ class NurseRoster:
         return legal
     
     def unrestricted_domain(self, i, d):
+        """Returns the full set of possible shifts for a nurse on a given day, without applying sequential constraints."""
         if d in self.leave_days[i]:
             return ['R']
         options = list(BASE_DOMAIN)
@@ -106,12 +110,14 @@ class NurseRoster:
         return options
 
     def forward_check(self, i, d):
+        """Checks whether a nurse still has at least one legal shift option on the next day."""
         if d + 1 >= self.D:
             return True
         return len(self.candidate_shifts(i, d + 1)) > 0
 
 
     def apply(self, i, d, shift):
+        """Assigns a shift to a nurse on a given day and updates related counters."""
         self.roster[i][d] = shift
         counts = self.day_counts[d]
         if shift in ('M', 'A', 'E', 'B'):
@@ -119,6 +125,7 @@ class NurseRoster:
             self.shift_units[i] += 2 if shift == 'B' else 1
 
     def undo(self, i, d, shift):
+        """Reverts a previously applied shift assignment and updates related counters."""
         self.roster[i][d] = None
         counts = self.day_counts[d]
         if shift in ('M', 'A', 'E', 'B'):
@@ -127,15 +134,17 @@ class NurseRoster:
 
 
     def day_bucket_totals(self, d):
+        """Computes the total number of nurses covering the Morning, Afternoon, and Evening buckets on a given day."""
         c = self.day_counts[d]
         return c['M'] + c['B'], c['A'] + c['B'], c['E']
 
     def within_budget(self, d):
+        """Checks whether the current shift counts for a day are within the required limits."""
         mm, aa, ee = self.day_bucket_totals(d)
         return mm <= self.m and aa <= self.a and ee <= self.e
 
     def day_complete_and_valid(self, d):
-        """Called once every nurse has a shift on day d (H4 + H7)."""
+        """Validates that a fully assigned day satisfies the exact staffing requirements and surgical-day coverage constraint."""
         mm, aa, ee = self.day_bucket_totals(d)
         if mm != self.m or aa != self.a or ee != self.e:
             return False
@@ -144,6 +153,7 @@ class NurseRoster:
         return True
 
     def quota_feasible(self, day, domains, b_already_assigned):
+        """Checks whether remaining unassigned nurses can still satisfy the day's staffing requirements, given their current candidate domains."""
         mm, aa, ee = self.day_bucket_totals(day)
         need_m, need_a, need_e = self.m - mm, self.a - aa, self.e - ee
 
@@ -164,6 +174,7 @@ class NurseRoster:
         return True
 
     def next_day_quota_plausible(self, day):
+        """Performs a lookahead check to verify that the following day's staffing requirements can plausibly be met given current assignments."""
         nd = day + 1
         if nd >= self.D:
             return True
@@ -186,6 +197,7 @@ class NurseRoster:
         return True
 
     def search(self, day=0, unassigned=None):
+        """Performs backtracking search with MRV ordering and forward checking to find a valid nurse roster assignment."""
         if day == self.D:
             return True
     
@@ -221,10 +233,12 @@ class NurseRoster:
         return False
 
     def solve(self):
+        """Runs the search procedure to solve the nurse scheduling problem."""
         ok = self.search()
         return ok
 
     def to_json_dict(self):
+        """Converts the solved roster into a JSON-serializable dictionary."""
         result = {}
         for i in range(self.N):
             for d in range(self.D):

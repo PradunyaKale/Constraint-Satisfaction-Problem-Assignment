@@ -1,7 +1,6 @@
 import sys
 import csv
 import json
-import time
 import random
 
 BASE_DOMAIN = ['R', 'M', 'A', 'E']
@@ -36,6 +35,7 @@ def parse_input(input_csv):
 class NurseRosterSoft:
 
     def __init__(self, N, D, Ns, Ng, m, a, e, T, days, K, leaves):
+        """Initializes the nurse roster problem state, including per-nurse shift counts used for the soft-cost objective."""
         self.N, self.D = N, D
         self.Ns, self.Ng = Ns, Ng
         self.m, self.a, self.e = m, a, e
@@ -64,6 +64,7 @@ class NurseRosterSoft:
     # Shared with Part A: per-nurse legal-value computation
     # ------------------------------------------------------------------
     def consecutive_work_before(self, i, d):
+        """Counts the number of consecutive working days for a nurse immediately before day d."""
         streak = 0
         dd = d - 1
         while dd >= 0 and streak < 5 and self.roster[i][dd] != 'R':
@@ -72,6 +73,8 @@ class NurseRosterSoft:
         return streak
 
     def candidate_shifts(self, i, d):
+        """Computes the legal shift assignments for a nurse on a given day, based on constraints already fixed by prior days."""
+
         if d in self.leave_days[i]:
             return ['R']
 
@@ -85,21 +88,34 @@ class NurseRosterSoft:
             if shift == 'R':
                 legal.append(shift)
                 continue
+
+            # H5: 5 consecutive working days already used up -> must rest
             if self.consecutive_work_before(i, d) >= 5:
                 continue
+
+            # H2: no two consecutive morning shifts (B counts as a morning)
             if shift in ('M', 'B') and prev in ('M', 'B'):
                 continue
+
+            # H3: no morning immediately after evening
             if shift in ('M', 'B') and prev == 'E':
                 continue
+
+            # H6: after a B, cannot do M or A the next day
             if prev == 'B' and shift in ('M', 'A'):
                 continue
+
+            # H8: total shift-unit budget K
             units = 2 if shift == 'B' else 1
             if self.shift_units[i] + units > self.K:
                 continue
+
             legal.append(shift)
         return legal
 
     def unrestricted_domain(self, i, d):
+        """Returns the full set of possible shifts for a nurse on a given day, without applying sequential constraints."""
+
         if d in self.leave_days[i]:
             return ['R']
         options = list(BASE_DOMAIN)
@@ -108,6 +124,8 @@ class NurseRosterSoft:
         return options
 
     def forward_check(self, i, d):
+        """Checks whether a nurse still has at least one legal shift option on the next day."""
+
         if d + 1 >= self.D:
             return True
         return len(self.candidate_shifts(i, d + 1)) > 0
@@ -115,29 +133,39 @@ class NurseRosterSoft:
     # ------------------------------------------------------------------
     # Soft-constraint-aware value ordering (construction phase only)
     # ------------------------------------------------------------------
+    
     def balance_order(self, i, options):
-        """Reorder a nurse's candidate shifts to prefer, among M/A/E,
-        whichever bucket that nurse currently has the FEWEST of --
-        keeps the roster balanced from the start instead of relying
-        entirely on local_search() to fix it up afterward. R and B
-        keep the same relative position they had in Part A's ordering
-        (R tried first, B tried last), so this doesn't change Part A's
-        proven search efficiency, only the tie-break among M/A/E."""
+        """Reorders a nurse's candidate shifts to prefer the M/A/E bucket the nurse currently has fewest of, promoting balance during construction."""
+
         counts = self.nurse_counts[i]
 
-        def key(s):
-            if s == 'R':
-                return -1
-            if s == 'B':
-                return 1000
-            return counts[s]
+        normal_shifts = ['M', 'A', 'E']
 
-        return sorted(options, key=key)
+        # Sort M/A/E according to which shift has the fewest assignments
+        normal_shifts = sorted(normal_shifts, key=lambda shift: counts[shift])
+
+        result = []
+
+        # R should always come first
+        if 'R' in options:
+            result.append('R')
+
+        # Add M/A/E in balanced order
+        for shift in normal_shifts:
+            if shift in options:
+                result.append(shift)
+
+        # B should always come last
+        if 'B' in options:
+            result.append('B')
+
+        return result
 
     # ------------------------------------------------------------------
     # Apply / undo an assignment (construction phase)
     # ------------------------------------------------------------------
     def apply(self, i, d, shift):
+        """Assigns a shift to a nurse on a given day and updates shift, day, and nurse-level counters."""
         self.roster[i][d] = shift
         counts = self.day_counts[d]
         if shift in ('M', 'A', 'E', 'B'):
@@ -150,6 +178,7 @@ class NurseRosterSoft:
             self.nurse_counts[i][shift] += 1
 
     def undo(self, i, d, shift):
+        """Reverts a previously applied shift assignment and updates shift, day, and nurse-level counters."""
         self.roster[i][d] = None
         counts = self.day_counts[d]
         if shift in ('M', 'A', 'E', 'B'):
@@ -165,14 +194,17 @@ class NurseRosterSoft:
     # Day-level quota (H4/H7) -- same as Part A
     # ------------------------------------------------------------------
     def day_bucket_totals(self, d):
+        """Computes the total number of nurses covering the Morning, Afternoon, and Evening buckets on a given day."""
         c = self.day_counts[d]
         return c['M'] + c['B'], c['A'] + c['B'], c['E']
 
     def within_budget(self, d):
+        """Checks whether the current shift counts for a day are within the required limits."""
         mm, aa, ee = self.day_bucket_totals(d)
         return mm <= self.m and aa <= self.a and ee <= self.e
 
     def day_complete_and_valid(self, d):
+        """Validates that a fully assigned day satisfies the exact staffing requirements and surgical-day coverage constraint."""
         mm, aa, ee = self.day_bucket_totals(d)
         if mm != self.m or aa != self.a or ee != self.e:
             return False
@@ -181,6 +213,7 @@ class NurseRosterSoft:
         return True
 
     def quota_feasible(self, day, domains, b_already_assigned):
+        """Checks whether remaining unassigned nurses can still satisfy the day's staffing requirements, given their current candidate domains."""
         mm, aa, ee = self.day_bucket_totals(day)
         need_m, need_a, need_e = self.m - mm, self.a - aa, self.e - ee
         if need_m < 0 or need_a < 0 or need_e < 0:
@@ -196,6 +229,7 @@ class NurseRosterSoft:
         return True
 
     def next_day_quota_plausible(self, day):
+        """Performs a lookahead check to verify that the following day's staffing requirements can plausibly be met given current assignments."""
         nd = day + 1
         if nd >= self.D:
             return True
@@ -214,15 +248,12 @@ class NurseRosterSoft:
             return False
         return True
 
-    def time_up(self):
-        return (time.time() - self.start_time) > self.T
 
     # ------------------------------------------------------------------
     # Phase 1: backtracking search to find ANY valid roster
     # ------------------------------------------------------------------
     def search(self, day=0, unassigned=None):
-        if self.time_up():
-            return False
+        """Performs backtracking search with MRV ordering and forward checking to find a valid nurse roster assignment."""
         if day == self.D:
             return True
         if unassigned is None:
@@ -240,6 +271,7 @@ class NurseRosterSoft:
         if not self.next_day_quota_plausible(day):
             return False
 
+        # MRV: branch on the most-constrained nurse first.
         nurse = min(unassigned, key=lambda i: len(domains[i]))
         remaining = [i for i in unassigned if i != nurse]
         ordered = self.balance_order(nurse, domains[nurse])
@@ -258,19 +290,22 @@ class NurseRosterSoft:
     # Phase 2: same-day pairwise-swap local search on the soft cost
     # ------------------------------------------------------------------
     def nurse_cost(self, i):
-        """cost_i = (M-A)^2 + (A-E)^2 + (M-E)^2 -- the exact-integer
-        closed form of the spec's 9*(1/3)*sum-of-squared-deviations
-        formula for exactly 3 buckets (standard sum-of-squared-
-        pairwise-differences identity), so no floats are needed."""
+        """Computes the soft-constraint cost for a single nurse based on the spread of their Morning, Afternoon, and Evening shift counts."""
+        # cost_i = (M-A)^2 + (A-E)^2 + (M-E)^2 -- the exact-integer
+        # closed form of the spec's 9*(1/3)*sum-of-squared-deviations
+        # formula for exactly 3 buckets (standard sum-of-squared-
+        # pairwise-differences identity), so no floats are needed.
         c = self.nurse_counts[i]
         m, a, e = c['M'], c['A'], c['E']
         return (m - a) ** 2 + (a - e) ** 2 + (m - e) ** 2
 
     def total_cost(self):
+        """Computes the total soft-constraint cost across all nurses."""
         return sum(self.nurse_cost(i) for i in range(self.N))
 
     @staticmethod
     def temporal_ok(prev, cur):
+        """Checks whether two consecutive shift assignments satisfy the sequential shift constraints."""
         if cur in ('M', 'B') and prev in ('M', 'B'):
             return False
         if cur in ('M', 'B') and prev == 'E':
@@ -280,11 +315,7 @@ class NurseRosterSoft:
         return True
 
     def can_place(self, i, d, shift):
-        """Whether nurse i could hold `shift` on day d, GIVEN every
-        other cell as currently assigned (both the day BEFORE and the
-        day AFTER, unlike candidate_shifts which only ever looks
-        backward during construction). Used to validate a same-day
-        swap candidate without mutating any state."""
+        """Checks whether a nurse could legally hold a given shift on a given day, considering both the preceding and following days."""
         if d in self.leave_days[i] and shift != 'R':                # H9
             return False
         if shift == 'B' and (self.nurse_type[i] != 'S'               # H1
@@ -321,6 +352,7 @@ class NurseRosterSoft:
         return True
 
     def _cell_delta(self, i, shift, sign):
+        """Updates a nurse's shift-unit and shift-count totals to reflect adding or removing a single shift assignment."""
         if shift in ('M', 'A', 'E', 'B'):
             self.shift_units[i] += sign * (2 if shift == 'B' else 1)
         if shift == 'B':
@@ -330,12 +362,7 @@ class NurseRosterSoft:
             self.nurse_counts[i][shift] += sign
 
     def commit_swap(self, i, j, d, new_i, new_j):
-        """Same-day swap between two nurses. Note day_counts[d] is
-        NOT touched: exchanging who holds which shift on a single day
-        can never change that day's M/A/E/B totals (still the same
-        multiset of letters, just relabeled), so H4/H7 stay satisfied
-        automatically -- only H1/H2/H3/H5/H6/H8/H9 for i and j need
-        checking (done by can_place before this is ever called)."""
+        """Performs a same-day shift swap between two nurses, updating their shift-unit and shift-count totals accordingly."""
         old_i, old_j = self.roster[i][d], self.roster[j][d]
         self._cell_delta(i, old_i, -1)
         self._cell_delta(j, old_j, -1)
@@ -345,11 +372,7 @@ class NurseRosterSoft:
         self._cell_delta(j, new_j, +1)
 
     def _recompute_derived_state(self):
-        """Rebuild nurse_counts / shift_units from self.roster after
-        swapping in a snapshot wholesale (e.g. restoring the best
-        roster found by local_search). day_counts needs no rebuild:
-        every local_search move is a same-day swap between two nurses,
-        which can never change a day's M/A/E/B totals."""
+        """Rebuilds nurse shift counts and shift-unit totals from the current roster after a wholesale roster substitution."""
         self.nurse_counts = [{'M': 0, 'A': 0, 'E': 0} for _ in range(self.N)]
         self.shift_units = [0] * self.N
         for i in range(self.N):
@@ -364,39 +387,7 @@ class NurseRosterSoft:
                     self.shift_units[i] += 1
 
     def local_search(self):
-        """Stochastic hill climbing with sideways moves on the soft
-        cost, using same-day nurse-pair swaps as the move set.
-
-        Neighbour generation is randomized: on each step we sample one
-        random same-day swap rather than enumerating every possible
-        swap and taking the single best one. Any move that improves
-        the cost is accepted immediately -- that "accept the first
-        improvement you randomly find" behaviour is what makes this
-        *stochastic* hill climbing rather than steepest-ascent hill
-        climbing.
-
-        We never accept a move that makes the total cost worse (that
-        would be simulated annealing territory, not hill climbing).
-        We do allow a bounded run of sideways (delta == 0) moves so
-        the walk can cross flat plateaus instead of freezing the
-        instant it hits one -- the streak resets on every genuine
-        improvement, and once the allowance is used up only strictly
-        improving moves are accepted until it resets again.
-
-        This phase is bounded by a fixed number of iterations
-        (MAX_ITERATIONS), not a wall-clock deadline -- T is spent
-        entirely protecting Phase 1's backtracking search.
-
-        Because every accepted move has delta <= 0, the running total
-        cost is monotonically non-increasing, so the roster held at
-        any moment is always at least as good as anything seen
-        earlier. We still keep an explicit snapshot of the best state,
-        updated whenever the cost strictly improves, and restore it at
-        the end -- this is the direct implementation of "return the
-        best roster found," and is a safety net against ending
-        mid-plateau at a state that isn't actually the best one
-        visited.
-        """
+        """Performs stochastic hill climbing with sideways moves on the soft cost, using same-day nurse-pair swaps as the move set."""
         if self.N < 2 or self.D == 0:
             return
 
@@ -451,21 +442,17 @@ class NurseRosterSoft:
             self.roster = best_roster
             self._recompute_derived_state()
 
-    # ------------------------------------------------------------------
     def solve(self):
-        self.start_time = time.time()
+        """Runs the backtracking search followed by local search to produce a valid, cost-optimized nurse roster."""
         found = self.search()
         if not found:
             return False
 
-        # T only protects Phase 1 (the backtracking construction above).
-        # Phase 2 is bounded by MAX_ITERATIONS instead of the clock.
-        print(self.total_cost())
         self.local_search()
-        print(self.total_cost())
         return True
 
     def to_json_dict(self):
+        """Converts the solved roster into a JSON-serializable dictionary."""
         result = {}
         for i in range(self.N):
             for d in range(self.D):
